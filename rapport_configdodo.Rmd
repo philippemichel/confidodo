@@ -1,0 +1,386 @@
+---
+title: "CONFIGDODO"
+subtitle: "Résultats"
+author: "Philippe MICHEL"
+date: "`r Sys.Date()`"
+bibliography: stat.bib
+csl: jama.csl
+lang: fr
+link-citations: true
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+    toc: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: true
+    theme: lumen
+  # tufte::tufte_html: default
+  word_document:
+    toc: yes
+  html_notebook:
+    fig_caption: yes
+    theme: spacelab
+  pdf_document:
+    includes:
+      in_header: tete.tex
+    keep_tex: yes
+    latex_engine: lualatex
+    toc: yes  
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include= FALSE}
+# knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE, message = TRUE)
+```
+
+
+```{r info}
+rm(list=ls())
+library("prettydoc")
+library("lubridate")
+library("janitor")
+library("thesisph")
+library("missMDA")
+library("epiDisplay")
+library("FactoMineR")
+library("factoextra")
+library("atable")
+library("knitr")
+library("finalfit")
+library("Hmisc")
+library("xtable")
+library("ggsci")
+library("stringr")
+library("tidyverse")
+library("kableExtra")
+sessionInfo()
+exp <- FALSE
+kk <- TRUE
+```
+
+```{r fonctions}
+tabcompx<- function(dfx, tri, 
+                      titre = "Tableau comparatif", 
+                      lab = "tabcomp",
+                      longt = FALSE, 
+                      export = FALSE, 
+                      correct = FALSE, 
+                      ka = TRUE){
+  #On supprime les données manquantes dans la variable de tri
+  #dfx <- dfx %>% 
+  #filter(!is.na({{tri}}))
+  #
+  tabx <- NULL
+  trix <- enquo(tri)
+  vv <- quo_name(trix)
+  triz <- dfx[vv]
+  triz <- as.factor(triz[[1]])
+  for (ll in 1:length(dfx)){
+    varx <- pull(dfx,all_of(ll))
+    print(str(varx))
+    # varx <- varx[[1]]
+    nom <- names(dfx)[ll]
+    print(nom)
+    if (nom != vv){
+      if (is.numeric(varx)){ # Variables numériques
+        lig <- lignum(nom,varx,triz, kk = ka)
+        tabx <- rbind(tabx,lig)
+      } else { # Variables factorielles
+        lig <- ligfx(nom,varx,triz)
+        tabx <- rbind(tabx,lig)
+      }
+    }
+  }
+  # Export
+  if (export) {
+    nomcsv <- paste0(titre,"_export_comparatif.csv")
+    write.csv(tabx,nomcsv)
+  }
+  # Création tableaux
+  ltit <- c(" ",levels(triz),"p")
+  kable(tabx, 
+        row.names = FALSE, 
+       # col.names = ltit, 
+        caption = titre, 
+        label = lab, 
+        escape = FALSE) %>% 
+    kable_styling(bootstrap_options = "striped", full_width = FALSE,
+                  position = "center")
+  
+}
+
+
+ligfx <- function(nom, varx, trix) {
+  print(str(varx))
+  tabx <- table(varx,trix)
+  chip <- chisq.test(tabx, correct = FALSE)
+  if (min(chip$expected)<5){chip <- chisq.test(tabx, correct = TRUE)}
+  chip <- chip[[3]]
+  if (is.na(chip)){
+    chip <- fisher.test(tabx)[[1]]
+  }
+  ccx <- beaup(chip)
+  stabx <- colSums(tabx)
+  tabf <- c(nom,rep(" ",length(stabx)),ccx)
+  for (i in 1: dim(tabx)[1]){
+    lig <- paste0("<em>&nbsp;&nbsp;",levels(varx)[i],"</em>")
+    for (j in 1: length(stabx)){
+      ltrans <- transangph(tabx[i,j],stabx[j])$lit
+      lig <- c(lig,ltrans) 
+    }
+    lig <- c(lig," ")
+    tabf <- rbind(tabf,lig)
+  }
+  return(tabf)
+}
+
+```
+
+
+```{r taille}
+nn <- bsamsize(0.13,.23)
+nn <- round(nn[1],0)+1
+```
+
+```{r import}
+# Importation d'une table .csv 
+# 
+tt <- read.csv("data/confidodo.csv",header = TRUE, na.strings = c("NA",""," "), dec = ",", as.is=FALSE) 
+tt <- clean_names(tt)
+tt$agej <- as.numeric(dmy("01/03/2020")-dmy(tt$naissance))/30.5
+tt$naissance <- round(as.numeric(dmy("01/03/2020")-dmy(tt$naissance))/365.25,0)
+names(tt)[5] <- "age"
+tt$code_dsm5 <- as.factor(tt$code_dsm5)
+tt <- as_tibble(tt)
+# Calcul des scores
+tt[,91:117] <- map_df(tt[91:117],as.numeric)-1
+tt <- mutate(tt,CID_numerique = rowSums(tt[,91:117]))
+tt$cid <- as.factor(ifelse(tt$CID_numerique>15,"Dépression sévère","Pas de dépression sévère"))
+tt <- mutate(tt,score_sommeil = rowSums(tt[,c(29:53)]))
+tt$troubles_sommeil <- as.factor(ifelse(tt$score_sommeil>44,"Sommeil pathologique","Sommeil normal"))
+
+ttc <- tt[,c(1,3,5,7:16,18,24:28,130:133)]
+
+```
+
+
+
+```{r sommeil1}
+# Calcul des sous groupes du score de sommeil
+nimsomn <- c(1,2,3,4,5,8,9)
+nparasomn <- c(6,10,15,16,17,18,19)
+npbrespi <- c(7,11,12,13,14)
+nnonrep <- c(20,21,22)
+ndiurne <- c(23,24,25)
+
+tt <- mutate(tt, insomnie = rowSums(tt[,28 + nimsomn]))
+tt$insomnie <- as.factor(ifelse(tt$insomnie > 21,"pathologique","normal"))
+tt <- mutate(tt, parasomnie = rowSums(tt[,28 + nparasomn]))
+tt$parasomnie <- as.factor(ifelse(tt$parasomnie > 17,"pathologique","normal"))
+tt <- mutate(tt, pb_respiratoire = rowSums(tt[,28 + npbrespi]))
+tt$pb_respiratoire <- as.factor(ifelse(tt$pb_respiratoire > 12,"pathologique","normal"))
+tt <- mutate(tt, non_reparateur = rowSums(tt[,28 + nnonrep]))
+tt$non_reparateur <- as.factor(ifelse(tt$non_reparateur > 11,"pathologique","normal"))
+tt <- mutate(tt, somnolence_diurne = rowSums(tt[,28 + ndiurne]))
+tt$somnolence_diurne <- as.factor(ifelse(tt$somnolence_diurne > 5,"pathologique","normal"))
+```
+
+```{r rcams}
+corg7 <- c(18,23,28,33,36,38,40,43,45,47,48,50,51,53,54,56,58,60,61,63,65,67,70,71,73,75,77,80,80)
+corg9 <- c(24,28,31,34,36,38,40,42,44,46,49,51,53,55,56,58,59,61,62,64,66,68,70,72,74,76,78,80,80)
+corg11 <- c(24,32,36,39,41,43,45,47,49,51,53,54,55,57,58,59,60,61,63,64,66,68,71,74,78,72,82,82,82)
+corg12 <- c(28,33,37,41,44,47,49,51,53,54,56,58,61,63,64,66,67,68,71,73,75,76,77,78,80,80,81,81,81)
+```
+
+
+# Description
+
+## Description simple
+
+L'échantillon comporte `r dim(tt)[1]` cas. Pour ces sujets, `r dim(tt)[2]` variables ont été recueillies. Vu le faible nombre de réponse des regroupements de réponses ont du être pratiqués. 
+
+Les questions suivantes ont été exclues en raison de réponses rares ou monotones ou parce qu'elles n'ont pas de sens pour le groupe contrôle : 
+
+- garde partagée
+- Si votre situation professionnelle a changé... (père & mère)
+- 19. Votre enfant a-t-il bénéficiéde téléconsultations avec un professionnel du CMP ou libéral (au téléphone ou en visio-conférence) pendant le confinement Si oui, combien de téléconsultations a-t-il eu
+- avez_vous_un_autre_enfant_suivi_en_pedopsychiatrie
+
+L'item "Trouble du sommeil" a été rempli pour tous les enfants. Le score CID n'a pu être calculé que sur `r length(na.omit(tt$cid))` cas (données manquantes).
+
+```{r desc} 
+# tabdescph(tt[c(3:28)], ka = kk)
+#tabdescph(tt[c(29:53)], ka = kk)
+#tabdescph(tt[c(54:91)], ka = kk)
+# tabdescph(tt[c(92:118)], ka = kk)
+#tabdescph(tt[c(119:126)], ka = kk)
+
+```
+,,
+## Analyse factorielle,
+
+Tentative de classification non supervisée des cas. Cette analyse est réalisée après imputation des données manquantes.
+
+```{r analfact}
+# ee <- estim_ncpFAMD(ttc)
+# ee <- ee$ncp
+ee <- 2
+ttcn <- imputeFAMD(ttc,ncp = ee)
+ttcn <- ttcn$completeObs
+mtt <- FAMD(ttcn, graph = FALSE)
+
+# fviz_famd_var(mtt, 
+#        geom = "text",
+#        repel = TRUE,
+#        ggtheme = theme_light()
+#        )
+# 
+# fviz_famd_ind(mtt, 
+#        geom = "point",
+#        ggtheme = theme_light(), 
+#        habillage = "groupe",
+#        addEllipses = TRUE,
+#        col.quali.var = "white", 
+#        )
+
+```
+
+Les deux groupes sont bien différents. Le graphique par variable montre deux axes : un social (mais très lié au groupe), le second lié au sommeil, horaires etc.
+
+# Scores & échelles
+ 
+## Échelle CID
+
+
+```{r cdigraph1}
+ttc %>% 
+  ggplot() +
+  aes(x = CID_numerique, fill =  groupe) +
+  geom_density(alpha = 0.5)+
+       theme_light() +
+        labs(title = "CID", 
+             x = "CID"
+    ) +
+    theme(plot.title = element_text(size=14, face="bold"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(size=12),
+          axis.text.y = element_blank(),
+    ) +
+    scale_color_lancet() +
+    scale_fill_lancet()
+
+  ggplot(ttc) +
+  aes(x = groupe, y = CID_numerique, fill = groupe) +
+  geom_violin() +
+  geom_boxplot(width = 0.2, fill = "white") +
+      theme_light() +
+        labs(title = "CID", 
+             x = "CID"
+    ) +
+    theme(plot.title = element_text(size=14, face="bold"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(size=12),
+          axis.text.y = element_text(size=12),
+    ) +
+    scale_color_lancet() +
+    scale_fill_lancet()
+```
+
+## Troubles du sommeil
+
+
+
+```{r tdsgraph1}
+tt %>%
+  ggplot() +
+  aes(x = score_sommeil, fill =  groupe) +
+  geom_density(alpha = 0.5)+
+         theme_light() +
+        labs(title = "Score de sommeil", 
+             x = ""
+    ) +
+    theme(plot.title = element_text(size=14, face="bold"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(size=12),
+          axis.text.y = element_blank(),
+    ) +
+    scale_color_lancet() +
+    scale_fill_lancet()
+
+  ggplot(tt) +
+  aes(x = groupe, y = score_sommeil, fill = groupe) +
+  geom_violin() +
+  geom_boxplot(width = 0.2, fill = "white") +
+  theme_light() +
+  labs(title = "Score de sommeil par groupe", 
+       y = "Score de sommeil chez l'enfant" ,
+        x  = ""
+  ) +
+  theme(plot.title = element_text(size=14, face="bold"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size=10)
+  ) +
+  scale_color_lancet() +
+  scale_fill_lancet()
+```
+
+
+
+# Comparaisons
+
+On compare deux groupes suivi ou non en CMP. 
+
+```{r comp1}
+tabcompx(ttc,groupe, export =TRUE, titre = "Résultats par groupe")
+
+```
+Il y a effectivement une différence entre les deux groupes pour les scores de sommeil & de dépression (CID) mais le questionnaire montre aussi, ce qui n'a rien de surprenant, que les deux populations sont très différentes en terme de structure familiale ou de classe sociale ce qui complique l'analyse. 
+
+On va donc sélectionner les variables liées au mode de vie en plusieurs étapes : 
+
+1 Les variables pour lesquelles p < 20 % (les autres ont peu de chance d'être significative)
+1 ensuite  par step-to-step descendant pur chercher le meilleur modèle; Cette étape est réalisée après imputation des données manquantes mais le résultat final présenté est calculé sur les données réelles.
+
+```{r compmulti1}
+llc <- lm(score_sommeil~sexe + age +  nb_freres_soeurs + propre_chambre + temps_devant_les_ecrans + lieu_de_confinement + temps_en_dehors_domicile + statut_du_couple_parental + profession_mere + profession_pere  + evolution_heure_coucher + heure_lever + cid + groupe, data = ttc)
+
+# ll <- glm(groupe~sexe + age  + lieu_de_confinement + temps_en_dehors_domicile + profession_mere +  evolution_heure_coucher  +
+#              troubles_sommeil, 
+#            data = ttc, family = "binomial")         
+#           
+#         
+shapiro.qqnorm(llc$residuals)
+tabmmph(llc, export = TRUE)
+```
+
+les troubles du sommeil semblent donc liées au groupe mais aussi à certaines variables démographiques (sexe,lieu de confinement, profession de la mère)
+
+
+# Calcul de la taille de l'échantillon
+
+**Pour mémoire**
+
+  Le taux d'insomnie dans la population de cet âge est autour de 15 %. En prenant ce chiffre comme référence & en estimant que le groupe "*pédopsychiatrie*" aura 10 % de plus soit 25 % d'insomnie, il faudra un échantillon de `r nn` cas dans chaque groupe pour montrer une différence avec un risque $\alpha$ de 5 % & une puissance de 80 %.
+  
+  
+# Analyse statistique
+  
+  La validation interne du questionnaire sera réalisée questionnaire par questionnaire, pour chaque groupe par le test alpha de Cronbach. Les réponses aux questions seront présentées en pourcentage avec leur intervalle de confiance calculé par bootstrap. Les données manquantes seront  ensuite imputées. Une analyse en correspondances multiples sera réalisée. Les deux groupes seront comparés pour le critère principal par un test de Chi2 puis une régression multiple. Les comparaisons des scores & échelles prévues dans les critères secondaires seront réalisés par test t De Student. Vu le grand nombre d'items une correction de xxx sera utilisée. 
+  
+Les statistiques ont été réalisées grâce au logiciel R[@rstat] avec en particulier les packages du Tidyverse[@tidy] & factoMineR[@facto].
+
+# References
+
+
+
+

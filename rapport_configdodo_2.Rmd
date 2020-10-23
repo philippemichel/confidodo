@@ -1,0 +1,367 @@
+---
+title: "CONFIGDODO"
+subtitle: "Résultats - suite"
+author: "Philippe MICHEL"
+date: "`r Sys.Date()`"
+bibliography: stat.bib
+csl: jama.csl
+lang: fr
+link-citations: true
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+    toc: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: true
+    theme: lumen
+  # tufte::tufte_html: default
+  word_document:
+    toc: yes
+  html_notebook:
+    fig_caption: yes
+    theme: spacelab
+  pdf_document:
+    includes:
+      in_header: tete.tex
+    keep_tex: yes
+    latex_engine: lualatex
+    toc: yes  
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include= FALSE}
+# knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE, message = TRUE)
+```
+
+
+```{r info}
+rm(list=ls())
+library("prettydoc")
+library("lubridate")
+library("janitor")
+library("thesisph")
+library("missMDA")
+library("epiDisplay")
+library("FactoMineR")
+library("factoextra")
+library("atable")
+library("knitr")
+library("finalfit")
+library("Hmisc")
+library("xtable")
+library("ggsci")
+library("stringr")
+library("tidyverse")
+library("kableExtra")
+sessionInfo()
+exp <- FALSE
+kk <- TRUE
+```
+
+```{r fonctions}
+tabcompx<- function(dfx, tri, 
+                      titre = "Tableau comparatif", 
+                      lab = "tabcomp",
+                      longt = FALSE, 
+                      export = FALSE, 
+                      correct = FALSE, 
+                      ka = TRUE){
+  #On supprime les données manquantes dans la variable de tri
+  #dfx <- dfx %>% 
+  #filter(!is.na({{tri}}))
+  #
+  tabx <- NULL
+  trix <- enquo(tri)
+  vv <- quo_name(trix)
+  triz <- dfx[vv]
+  triz <- as.factor(triz[[1]])
+  for (ll in 1:length(dfx)){
+    varx <- pull(dfx,all_of(ll))
+    # varx <- varx[[1]]
+    nom <- names(dfx)[ll]
+    if (nom != vv){
+      if (is.numeric(varx)){ # Variables numériques
+        lig <- lignum(nom,varx,triz, kk = ka)
+        tabx <- rbind(tabx,lig)
+      } else { # Variables factorielles
+        lig <- ligfx(nom,varx,triz)
+        tabx <- rbind(tabx,lig)
+      }
+    }
+  }
+  # Export
+  if (export) {
+    nomcsv <- paste0(titre,"_export_comparatif.csv")
+    write.csv(tabx,nomcsv)
+  }
+  # Création tableaux
+  ltit <- c(" ",levels(triz),"p")
+  kable(tabx, 
+        row.names = FALSE, 
+       col.names = ltit, 
+        caption = titre, 
+        label = lab, 
+        escape = FALSE) %>% 
+    kable_styling(bootstrap_options = "striped", full_width = FALSE,
+                  position = "center")
+  
+}
+
+
+ligfx <- function(nom, varx, trix) {
+  tabx <- table(varx,trix)
+  chip <- chisq.test(tabx, correct = FALSE)
+  if (min(chip$expected)<5){chip <- chisq.test(tabx, correct = TRUE)}
+  chip <- chip[[3]]
+  if (is.na(chip)){
+    chip <- fisher.test(tabx)[[1]]
+  }
+  ccx <- beaup(chip)
+  stabx <- colSums(tabx)
+  tabf <- c(nom,rep(" ",length(stabx)),ccx)
+  for (i in 1: dim(tabx)[1]){
+    lig <- paste0("<em>&nbsp;&nbsp;",levels(varx)[i],"</em>")
+    for (j in 1: length(stabx)){
+      ltrans <- transangph(tabx[i,j],stabx[j])$lit
+      lig <- c(lig,ltrans) 
+    }
+    lig <- c(lig," ")
+    tabf <- rbind(tabf,lig)
+  }
+  return(tabf)
+}
+```
+
+```{r import}
+# Importation d'une table .csv 
+# 
+tt <- read.csv("data/confidodo.csv",header = TRUE, na.strings = c("NA",""," "), dec = ",", as.is=FALSE) 
+tt <- clean_names(tt)
+tt$agej <- as.numeric(dmy("01/03/2020")-dmy(tt$naissance))/30.5
+tt$naissance <- round(as.numeric(dmy("01/03/2020")-dmy(tt$naissance))/365.25,0)
+names(tt)[5] <- "age"
+tt$code_dsm5 <- as.factor(tt$code_dsm5)
+tt <- as_tibble(tt)
+tt$temps_devant_les_ecrans <- fct_relevel(tt$temps_devant_les_ecrans,"Moins d'une heure par jour")
+ tt$lieu_de_confinement<- fct_relevel(tt$lieu_de_confinement,"Appartement sans balcon ni terrasse")
+  tt$temps_en_dehors_domicile<- fct_relevel(tt$temps_en_dehors_domicile,"Aucune sortie")
+  tt$statut_du_couple_parental <- fct_relevel(tt$statut_du_couple_parental,"En couple")
+  tt$heure_lever<- fct_relevel(tt$heure_lever,c("Avant 7h","Entre 7h et 8h","Entre 8h et 9h"  ,"Entre 9h et 10h","Après 10h"))
+# Calcul des scores
+tt[,91:117] <- map_df(tt[91:117],as.numeric)-1
+tt <- mutate(tt,cid = rowSums(tt[,91:117]))
+tt$cid <- as.factor(ifelse(tt$cid>15,"Dépression sévère","Pas de dépression sévère"))
+tt <- mutate(tt,troubles_sommeiln = rowSums(tt[,c(29:53)]))
+tt$troubles_sommeil <- as.factor(ifelse(tt$troubles_sommeiln>44,"Sommeil pathologique","Sommeil normal"))
+  tt$cid<- fct_relevel(tt$cid,"Pas de dépression sévère")
+  tt$troubles_sommeil<- fct_relevel(tt$troubles_sommeil,"Sommeil normal")
+  
+ttc <- tt[,c(1,3,5,7:16,18,24:28,130,131)]
+
+```
+
+
+
+```{r sommeil1}
+# Calcul des sous groupes du score de sommeil
+nimsomn <- c(1,2,3,4,5,8,9)
+nparasomn <- c(6,10,15,16,17,18,19)
+npbrespi <- c(7,11,12,13,14)
+nnonrep <- c(20,21,22)
+ndiurne <- c(23,24,25)
+
+tt <- mutate(tt, insomnie = rowSums(tt[,28 + nimsomn]))
+tt$insomnie <- as.factor(ifelse(tt$insomnie > 21,"pathologique","normal"))
+tt <- mutate(tt, parasomnie = rowSums(tt[,28 + nparasomn]))
+tt$parasomnie <- as.factor(ifelse(tt$parasomnie > 17,"pathologique","normal"))
+tt <- mutate(tt, pb_respiratoire = rowSums(tt[,28 + npbrespi]))
+tt$pb_respiratoire <- as.factor(ifelse(tt$pb_respiratoire > 12,"pathologique","normal"))
+tt <- mutate(tt, non_reparateur = rowSums(tt[,28 + nnonrep]))
+tt$non_reparateur <- as.factor(ifelse(tt$non_reparateur > 11,"pathologique","normal"))
+tt <- mutate(tt, somnolence_diurne = rowSums(tt[,28 + ndiurne]))
+tt$somnolence_diurne <- as.factor(ifelse(tt$somnolence_diurne > 5,"pathologique","normal"))
+```
+
+```{r rcams}
+corg7 <- c(18,23,28,33,36,38,40,43,45,47,48,50,51,53,54,56,58,60,61,63,65,67,70,71,73,75,77,80,80)
+corg9 <- c(24,28,31,34,36,38,40,42,44,46,49,51,53,55,56,58,59,61,62,64,66,68,70,72,74,76,78,80,80)
+corg11 <- c(24,32,36,39,41,43,45,47,49,51,53,54,55,57,58,59,60,61,63,64,66,68,71,74,78,72,82,82,82)
+corg12 <- c(28,33,37,41,44,47,49,51,53,54,56,58,61,63,64,66,67,68,71,73,75,76,77,78,80,80,81,81,81)
+```
+  
+# Compléments demandés en septembre
+
+##  Étude par type de troubles du sommeil
+
+L'étude des troubles du sommeil par ses différents signes ets possible mais revient à multiplier les tests ce qui n'ai jamais une bonne chose. Les résultats sont donnés bruts. Si on applique une correction pour tetsts multiples plus rien n'est significatif. 
+
+
+### Trouble du sommeil selon le groupe 
+
+```{r classessommeil}
+tabcompx(tt[,c(1,132:137)],groupe, titre = "Troubles du sommeil selon le groupe", export = FALSE)
+```
+
+```{r somgraph}
+gg <- pull(tt, groupe)
+#
+tabx <- NULL
+for (ll in 133:137) {
+  llx <- pull(tt, all_of(ll))
+  ttz <- table(gg, llx)
+  sttz <- rowSums(ttz)
+  for (i in 1:2) {
+    pc <- 100 * ttz[[i, 2]] / sttz[[i]]
+    tang <- transangph(ttz[[i, 2]], sttz[[i]])
+    lig <- c(names(tt[ll]), levels(tt$groupe)[i], pc, tang$binf, tang$bsup)
+    tabx <- rbind(tabx, lig)
+  }
+}
+tabx <- as.data.frame(tabx)
+names(tabx) <- c("trouble", "groupe" , "pc", "binf", "bsup")
+#
+ggplot(tabx, aes(x = trouble, y = as.numeric(pc), fill = groupe)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar (
+    aes(ymin = as.numeric(binf),
+        ymax = as.numeric(bsup)),
+    width = 0.5,
+    position = position_dodge(0.9)
+  ) +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12)
+  ) +
+    scale_color_lancet() +
+    scale_fill_lancet()
+```
+
+### Troubles du sommeil & diagnostic
+
+Vu les effectifs très faibles ce graphique n'a aucune valeur. Le diagnostic "312" ne comportant qu'un patient a été exclu.
+
+```{r tabdiag}
+tabcompx(tt[,c(4,132:137)],code_dsm5, titre = "Troubles du sommeil selon le diagnostic", export = FALSE)
+```
+
+
+```{r somgraph2}
+zz <- tt[,c(4,133:137)]
+zz <- filter(zz, code_dsm5 !="312")
+zz$code_dsm5 <- droplevels(zz$code_dsm5)
+diag <- pull(zz, code_dsm5)
+#
+tabx <- NULL
+for(ll in 3:6){
+llx <- pull(zz, ll) 
+ttz <- table(diag, llx)
+sttz <- rowSums(ttz)
+for (i in 1:5){
+  pc <- 100* ttz[[i,2]]/sttz[[i]]
+tang <- transangph(ttz[[i,2]],sttz[[i]])
+lig <- c(names(zz[ll]), levels(diag)[i],pc,tang$binf,tang$bsup)
+tabx <- rbind(tabx,lig) 
+}
+}
+tabx <- as.data.frame(tabx)
+names(tabx) <- c("trouble","diagnostic" ,"pc","binf", "bsup")
+#
+  ggplot(tabx, aes(x = diagnostic, y = as.numeric(pc), fill = trouble)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin = as.numeric(binf), ymax= as.numeric(bsup)), width = 0.5, position=position_dodge(.9)) +
+          theme_light() +
+        labs(title = "Troubles du sommeil", 
+             subtitle = "% selon le diagnostic",
+             y = "%"
+    ) +
+    theme(plot.title = element_text(size=14, face="bold"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(size=12),
+          axis.text.x = element_text(size=12),
+          axis.text.y = element_text(size=12)
+    ) +
+    scale_color_lancet() +
+    scale_fill_lancet()
+```
+  
+## Corrélations enfant/parents
+
+Analyse des corrélation entre le score de sommeil des enfants & les scores de sommeil  ou d'anxiété des parents. Aucun résultat franchement significatif.
+
+```{r corparent}
+tabx <- NULL
+for(i in  c(118,119,122,123)){
+lig <- pull(tt, all_of(i))
+zz <- cor.test(tt$troubles_sommeiln,lig)
+intconf <- paste0(round(zz$estimate, 3), " [",round(zz$conf.int[[1]],3)," ; ",round(zz$conf.int[[2]],3),"]")
+lign <- c(names(tt)[i],intconf, beaup(zz$p.value))
+tabx <- rbind(tabx, lign)
+}
+ kable(tabx, 
+          row.names = FALSE, 
+          col.names = c("", "r" ,"p"),
+          caption = "Corrélation sommeil des enfants / anxiété & sommeil des parents", 
+          label = "cor1", 
+          escape = FALSE) %>% 
+    kable_styling(bootstrap_options = "striped", full_width = FALSE,
+                  position = "center")
+```
+
+```{r corgraph2}
+corx <- function(vv){
+  zz <- cor.test(vv,tt$troubles_sommeiln)
+  zzt <-  paste0(round(zz$estimate, 3), 
+                 " [",round(zz$conf.int[[1]],3),
+                 " ;",
+                 round(zz$conf.int[[2]],3),"]")
+  return(zzt)
+}  
+
+graphcorx <- function(dbx , varx , titrex){
+  zzt <- summarise(dbx,corx({{varx}}))
+  dbx %>% 
+    ggplot() +
+    aes (x= {{varx}}, y = troubles_sommeiln, color = groupe) +
+    geom_jitter(width = 0.2, height = 0) + 
+    geom_smooth() +
+    theme_light() +
+    labs(title = "Corrélation enfant / parents", 
+         x = titrex ,
+         y = "Score de sommeil chez l'enfant"
+    ) +
+    theme(plot.title = element_text(size=14, face="bold"),
+          axis.title.x = element_text(size=12),
+          axis.title.y = element_text(size=12),
+          axis.text.x = element_text(size=11),
+          axis.text.y = element_text(size=11)
+    ) +
+    scale_color_lancet() +
+    scale_fill_lancet()
+}
+
+graphcorx(tt,mere_echelle_anxiete, "Échelle d'anxiété chez la mère")
+graphcorx(tt, mere_qualite_sommeil, "Qualité du sommeil chez la mère")
+graphcorx(tt,pere_echelle_anxiete, "Échelle d'anxiété chez le père")
+graphcorx(tt, pere_qualite_sommeil, "Qualité du sommeil chez le père")
+```
+
+  
+# Analyse statistique
+  
+  La validation interne du questionnaire sera réalisée questionnaire par questionnaire, pour chaque groupe par le test alpha de Cronbach. Les réponses aux questions seront présentées en pourcentage avec leur intervalle de confiance calculé par bootstrap. Les données manquantes seront  ensuite imputées. Une analyse en correspondances multiples sera réalisée. Les deux groupes seront comparés pour le critère principal par un test de Chi2 puis une régression multiple. Les comparaisons des scores & échelles prévues dans les critères secondaires seront réalisés par test t De Student. Vu le grand nombre d'items une correction de xxx sera utilisée. 
+  
+Les statistiques ont été réalisées grâce au logiciel R[@rstat] avec en particulier les packages du Tidyverse[@tidy] & factoMineR[@facto].
+
+# References
+
+
+
+
